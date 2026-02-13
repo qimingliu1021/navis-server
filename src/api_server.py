@@ -149,50 +149,13 @@ def parse_interests(interests: str) -> List[str]:
     return [i.strip() for i in interests.split(",") if i.strip()]
 
 
-def analyze_event_coverage(events: List[Dict[str, Any]], start_date: str, end_date: str) -> Dict[str, Any]:
-    """Ensure minimum events per day coverage."""
-    grouped: Dict[str, List[Dict[str, Any]]] = {}
-    
-    # Initialize all dates
-    from datetime import timedelta
-    current = datetime.fromisoformat(start_date)
-    end = datetime.fromisoformat(end_date)
-    
-    while current <= end:
-        date_str = current.strftime("%Y-%m-%d")
-        grouped[date_str] = []
-        current += timedelta(days=1)
-    
-    # Group events by date
-    for event in events:
-        if event.get("start_time"):
-            event_date = event["start_time"].split("T")[0]
-            if event_date in grouped:
-                grouped[event_date].append(event)
-    
-    # Calculate coverage
-    coverage = {}
-    for date, day_events in grouped.items():
-        def has_time_slot(events: List[Dict], start_hour: int, end_hour: int) -> bool:
-            for e in events:
-                try:
-                    hour = int(e["start_time"].split("T")[1].split(":")[0])
-                    if start_hour <= hour < end_hour:
-                        return True
-                except (KeyError, IndexError, ValueError):
-                    pass
-            return False
-        
-        coverage[date] = {
-            "count": len(day_events),
-            "events": day_events,
-            "has_morning": has_time_slot(day_events, 8, 12),
-            "has_afternoon": has_time_slot(day_events, 12, 17),
-            "has_evening": has_time_slot(day_events, 17, 24)
-        }
-    
-    return coverage
 
+
+
+
+from workflow import app as graph_app
+
+# ... (Logger class remains same, we will update how it's used or just let it log valid results)
 
 async def generate_itinerary(
     city: str,
@@ -201,79 +164,58 @@ async def generate_itinerary(
     end_date: str,
     logger: Logger
 ) -> Dict[str, Any]:
-    """Main orchestration function - coordinates Scout and Explorer."""
+    """Main orchestration function - uses LangGraph."""
     logger.log(f"\n{'=' * 60}")
-    logger.log("🚀 Starting Itinerary Generation Pipeline")
+    logger.log("🚀 Starting Itinerary Generation Pipeline (LangGraph)")
     logger.log(f"{'=' * 60}")
-    logger.log(f"📍 City: {city}")
-    logger.log(f"🎯 Interests: {', '.join(interests)}")
-    logger.log(f"📅 Dates: {start_date} to {end_date}")
     
-    logger.data = {
+    initial_state = {
         "city": city,
         "interests": interests,
         "start_date": start_date,
-        "end_date": end_date
+        "end_date": end_date,
+        "scout_links": [],     # Initialize
+        "explorer_events": [], # Initialize
+        "logs": []
     }
     
-    # Phase 1: Scout - Find event links
-    logger.log(f"\n{'─' * 40}")
-    logger.log("📡 PHASE 1: SCOUT - Finding Event Links")
-    logger.log(f"{'─' * 40}")
-    
-    scout_results = await scout_events(city, interests, start_date, end_date, logger.log)
-    logger.log_scout_results(scout_results)
-    
-    if not scout_results.get("all_links"):
-        logger.log("⚠️ Scout found no links. Cannot proceed.")
+    # Run the graph
+    try:
+        final_state = await graph_app.ainvoke(initial_state)
+    except Exception as e:
+        logger.log(f"❌ Graph execution failed: {e}")
         return {
             "success": False,
-            "events": [],
-            "message": "No event links found during search"
+            "error": str(e)
         }
     
-    # Phase 2: Explorer - Analyze links and extract events
-    logger.log(f"\n{'─' * 40}")
-    logger.log("🔬 PHASE 2: EXPLORER - Analyzing Links")
-    logger.log(f"{'─' * 40}")
+    # Extract results
+    events = final_state.get("itinerary", [])
+    coverage = final_state.get("coverage", {})
+    logs = final_state.get("logs", [])
     
-    explorer_results = await explore_links(scout_results["all_links"], city, logger.log)
-    logger.log_explorer_results(explorer_results)
-    
-    # Phase 3: Organize and validate events
-    logger.log(f"\n{'─' * 40}")
-    logger.log("📋 PHASE 3: ORGANIZING EVENTS")
-    logger.log(f"{'─' * 40}")
-    
-    events = explorer_results.get("events", [])
-    
-    # Sort by start_time
-    events.sort(key=lambda e: e.get("start_time", "2099-01-01T00:00:00"))
-    
-    # Analyze coverage
-    coverage = analyze_event_coverage(events, start_date, end_date)
-    
-    # Log coverage summary
-    for date, info in coverage.items():
-        morning = "✓" if info["has_morning"] else "✗"
-        afternoon = "✓" if info["has_afternoon"] else "✗"
-        evening = "✓" if info["has_evening"] else "✗"
-        logger.log(f"📅 {date}: {info['count']} events (M:{morning} A:{afternoon} E:{evening})")
-    
+    # Log internal node logs
+    for log_msg in logs:
+        logger.log(f"[Graph] {log_msg}")
+        
     logger.log_final_itinerary(events)
+    
+    # Calculate stats for response compatibility
+    scout_links = final_state.get("scout_links", [])
+    explorer_events = final_state.get("explorer_events", [])
     
     return {
         "success": True,
         "events": events,
         "coverage": coverage,
         "scout_stats": {
-            "total_links_found": scout_results.get("total_links_found", 0),
-            "searches_performed": len(scout_results.get("search_results", []))
+            "total_links_found": len(scout_links),
+            "searches_performed": len(interests) # Approximation
         },
         "explorer_stats": {
-            "links_analyzed": explorer_results.get("total_analyzed", 0),
-            "events_extracted": explorer_results.get("total_events", 0),
-            "links_rejected": len(explorer_results.get("rejected", []))
+            "links_analyzed": len(scout_links),
+            "events_extracted": len(explorer_events),
+            "links_rejected": len(scout_links) - len(explorer_events)
         }
     }
 
@@ -358,7 +300,7 @@ async def generate_itinerary_endpoint(request: GenerateItineraryRequest):
 
 @app.post("/api/generate-itinerary-stream")
 async def generate_itinerary_stream(request: GenerateItineraryRequest):
-    """Streaming itinerary generation endpoint (SSE)."""
+    """Streaming itinerary generation endpoint (SSE) using LangGraph."""
     request_id = str(int(datetime.now().timestamp() * 1000))
     logger = Logger(request_id)
     
@@ -374,55 +316,80 @@ async def generate_itinerary_stream(request: GenerateItineraryRequest):
                 yield send_event("error", {"message": "At least one interest is required"})
                 return
             
+            initial_state = {
+                "city": request.city,
+                "interests": interest_array,
+                "start_date": request.start_date,
+                "end_date": request.end_date,
+                "scout_links": [],
+                "explorer_events": [],
+                "logs": []
+            }
+            
             yield send_event("progress", {
                 "phase": "start",
                 "message": f"Planning your {request.city} adventure...",
-                "detail": f"Looking for {', '.join(interest_array)} experiences"
+                "detail": f"Initializing agent workflow..."
             })
             
-            # Phase 1: Scout
-            yield send_event("progress", {
-                "phase": "scout",
-                "message": "Discovering events and activities...",
-                "detail": "Searching multiple sources"
-            })
+            # Variables to capture state
+            captured_data = {
+                "scout_links": [],
+                "explorer_events": [],
+                "itinerary": [],
+                "coverage": {}
+            }
             
-            scout_results = await scout_events(
-                request.city, interest_array, request.start_date, request.end_date, logger.log
-            )
-            logger.log_scout_results(scout_results)
+            # Stream graph updates
+            async for output in graph_app.astream(initial_state):
+                for node_name, node_state in output.items():
+                    if node_name == "scout":
+                        links = node_state.get("scout_links", [])
+                        captured_data["scout_links"] = links
+                        yield send_event("progress", {
+                            "phase": "scout_complete",
+                            "message": f"Found {len(links)} potential events",
+                            "detail": "Scout phase complete. Analyzing links..."
+                        })
+                        
+                    elif node_name == "explorer":
+                        events = node_state.get("explorer_events", [])
+                        captured_data["explorer_events"] = events
+                        yield send_event("progress", {
+                            "phase": "explorer_complete",
+                            "message": f"Analyzed events",
+                            "detail": f"Explorer phase complete. Found {len(events)} valid events."
+                        })
+                    
+                    elif node_name == "planner":
+                        itinerary = node_state.get("itinerary", [])
+                        coverage = node_state.get("coverage", {})
+                        captured_data["itinerary"] = itinerary
+                        captured_data["coverage"] = coverage
+                        yield send_event("progress", {
+                            "phase": "organize",
+                            "message": "Itinerary organized",
+                            "detail": "Finalizing schedule..."
+                        })
+
+            # Construct final response
+            events = captured_data["itinerary"]
+            coverage = captured_data["coverage"]
+            scout_links = captured_data["scout_links"]
+            explorer_events = captured_data["explorer_events"]
             
-            if not scout_results.get("all_links"):
-                yield send_event("error", {"message": "No events found for your interests"})
-                return
+            # Calculate stats
+            scout_stats = {
+                "total_links_found": len(scout_links),
+                "searches_performed": len(interest_array)
+            }
+            explorer_stats = {
+                "links_analyzed": len(scout_links),
+                "events_extracted": len(explorer_events),
+                "links_rejected": len(scout_links) - len(explorer_events)
+            }
             
-            yield send_event("progress", {
-                "phase": "scout_complete",
-                "message": f"Found {scout_results['total_links_found']} potential events!",
-                "detail": "Now analyzing each one..."
-            })
-            
-            # Phase 2: Explorer
-            yield send_event("progress", {
-                "phase": "explorer",
-                "message": "Analyzing events...",
-                "detail": f"Processing {len(scout_results['all_links'])} sources"
-            })
-            
-            explorer_results = await explore_links(scout_results["all_links"], request.city, logger.log)
-            logger.log_explorer_results(explorer_results)
-            
-            # Phase 3: Organize
-            yield send_event("progress", {
-                "phase": "organize",
-                "message": "Organizing your itinerary...",
-                "detail": "Creating your personalized schedule"
-            })
-            
-            events = explorer_results.get("events", [])
-            events.sort(key=lambda e: e.get("start_time", "2099-01-01T00:00:00"))
-            
-            coverage = analyze_event_coverage(events, request.start_date, request.end_date)
+            # Log final results to file
             logger.log_final_itinerary(events)
             
             response = {
@@ -436,15 +403,8 @@ async def generate_itinerary_stream(request: GenerateItineraryRequest):
                 "events": len([e for e in events if e.get("type") == "event"]),
                 "activities": len([e for e in events if e.get("type") == "activity"]),
                 "pipeline_stats": {
-                    "scout": {
-                        "total_links_found": scout_results.get("total_links_found", 0),
-                        "searches_performed": len(scout_results.get("search_results", []))
-                    },
-                    "explorer": {
-                        "links_analyzed": explorer_results.get("total_analyzed", 0),
-                        "events_extracted": explorer_results.get("total_events", 0),
-                        "links_rejected": len(explorer_results.get("rejected", []))
-                    }
+                    "scout": scout_stats,
+                    "explorer": explorer_stats
                 },
                 "generated_at": datetime.now().isoformat(),
                 "request_id": request_id

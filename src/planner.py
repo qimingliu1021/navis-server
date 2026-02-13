@@ -149,3 +149,48 @@ def format_itinerary(events: List[Dict[str, Any]]) -> str:
             output += f"         📍 {venue}\n"
     
     return output
+
+
+def analyze_event_coverage(events: List[Dict[str, Any]], start_date: str, end_date: str) -> Dict[str, Any]:
+    """Ensure minimum events per day coverage."""
+    grouped: Dict[str, List[Dict[str, Any]]] = {}
+    
+    # Initialize all dates
+    from datetime import timedelta
+    current = datetime.fromisoformat(start_date)
+    end = datetime.fromisoformat(end_date)
+    
+    while current <= end:
+        date_str = current.strftime("%Y-%m-%d")
+        grouped[date_str] = []
+        current += timedelta(days=1)
+    
+    # Group events by date
+    for event in events:
+        if event.get("start_time"):
+            event_date = event["start_time"].split("T")[0]
+            if event_date in grouped:
+                grouped[event_date].append(event)
+    
+    # Calculate coverage
+    coverage = {}
+    for date, day_events in grouped.items():
+        def has_time_slot(events: List[Dict], start_hour: int, end_hour: int) -> bool:
+            for e in events:
+                try:
+                    hour = int(e["start_time"].split("T")[1].split(":")[0])
+                    if start_hour <= hour < end_hour:
+                        return True
+                except (KeyError, IndexError, ValueError):
+                    pass
+            return False
+        
+        coverage[date] = {
+            "count": len(day_events),
+            "events": day_events,
+            "has_morning": has_time_slot(day_events, 8, 12),
+            "has_afternoon": has_time_slot(day_events, 12, 17),
+            "has_evening": has_time_slot(day_events, 17, 24)
+        }
+    
+    return coverage
