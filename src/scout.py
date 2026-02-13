@@ -168,7 +168,7 @@ async def run_with_concurrency(tasks: List, limit: int) -> List:
         async with semaphore:
             return await task
     
-    return await asyncio.gather(*[run_task(t) for t in tasks])
+    return await asyncio.gather(*[run_task(t) for t in tasks], return_exceptions=True)
 
 
 async def scout_events(

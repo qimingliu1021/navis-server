@@ -1,4 +1,5 @@
 import json
+import asyncio
 from datetime import datetime
 from typing import Dict, Any
 
@@ -16,14 +17,15 @@ async def scout_node(state: ItineraryState) -> Dict[str, Any]:
     start_date = state["start_date"]
     end_date = state["end_date"]
     
-    # Simple logger that prints to stdout (LangGraph captures stdout usually)
-    # in a real app we might want to append to state["logs"] but that can get large.
     def log_func(msg: str):
         print(f"[Scout] {msg}")
     
     log_func(f"Starting scout for {city} with interests: {interests}")
     
-    results = await scout_events(city, interests, start_date, end_date, log_func)
+    # Shield from cancellation so Gemini calls complete even if client disconnects
+    results = await asyncio.shield(
+        scout_events(city, interests, start_date, end_date, log_func)
+    )
     
     return {
         "scout_links": results.get("all_links", []),
@@ -43,7 +45,10 @@ async def explorer_node(state: ItineraryState) -> Dict[str, Any]:
         
     log_func(f"Starting explorer with {len(links)} links")
     
-    results = await explore_links(links, city, log_func)
+    # Shield from cancellation so Gemini calls complete even if client disconnects
+    results = await asyncio.shield(
+        explore_links(links, city, log_func)
+    )
     
     return {
         "explorer_events": results.get("events", []),
