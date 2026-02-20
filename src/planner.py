@@ -7,11 +7,17 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime
 
 
+def _parse_dt(s: str) -> datetime:
+    """Parse an ISO datetime string and strip timezone info for safe comparison."""
+    dt = datetime.fromisoformat(s)
+    return dt.replace(tzinfo=None) if dt.tzinfo else dt
+
+
 def sort_by_time(events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Sort events chronologically by start_time."""
     return sorted(
         events,
-        key=lambda e: datetime.fromisoformat(e.get("start_time", "2099-01-01T00:00:00"))
+        key=lambda e: _parse_dt(e.get("start_time", "2099-01-01T00:00:00"))
     )
 
 
@@ -62,13 +68,13 @@ def filter_by_date_range(
     end_date: str
 ) -> List[Dict[str, Any]]:
     """Filter events by date range."""
-    start = datetime.fromisoformat(start_date)
-    end = datetime.fromisoformat(f"{end_date}T23:59:59")
+    start = _parse_dt(start_date)
+    end = _parse_dt(f"{end_date}T23:59:59")
     
     return [
         event for event in events
         if event.get("start_time") and 
-           start <= datetime.fromisoformat(event["start_time"]) <= end
+           start <= _parse_dt(event["start_time"]) <= end
     ]
 
 
@@ -81,8 +87,8 @@ def find_schedule_gaps(day_events: List[Dict[str, Any]]) -> List[Dict[str, Any]]
     sorted_events = sort_by_time(day_events)
     
     for i in range(len(sorted_events) - 1):
-        current_end = datetime.fromisoformat(sorted_events[i]["end_time"])
-        next_start = datetime.fromisoformat(sorted_events[i + 1]["start_time"])
+        current_end = _parse_dt(sorted_events[i]["end_time"])
+        next_start = _parse_dt(sorted_events[i + 1]["start_time"])
         gap_minutes = (next_start - current_end).total_seconds() / 60
         
         if gap_minutes > 60:  # Gap > 1 hour
@@ -136,7 +142,7 @@ def format_itinerary(events: List[Dict[str, Any]]) -> str:
     
     for date in sorted(grouped.keys()):
         day_events = grouped[date]
-        date_obj = datetime.fromisoformat(date)
+        date_obj = _parse_dt(date)
         formatted = date_obj.strftime("%A, %B %d")
         
         output += f"\n📅 {formatted}\n"
@@ -157,8 +163,8 @@ def analyze_event_coverage(events: List[Dict[str, Any]], start_date: str, end_da
     
     # Initialize all dates
     from datetime import timedelta
-    current = datetime.fromisoformat(start_date)
-    end = datetime.fromisoformat(end_date)
+    current = _parse_dt(start_date)
+    end = _parse_dt(end_date)
     
     while current <= end:
         date_str = current.strftime("%Y-%m-%d")

@@ -30,6 +30,7 @@ from user_interests import INTEREST_CATEGORIES, get_all_tags, find_categories_fo
 CONFIG = {
     "google_api_key": os.getenv("GOOGLE_API_KEY"),
     "gemini_model": os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
+    "gemini_flash_model": os.getenv("GEMINI_FLASH_MODEL", "gemini-2.0-flash"),
     "port": int(os.getenv("API_PORT", "5500")),
 }
 
@@ -226,7 +227,8 @@ async def health_check():
     return {
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
-        "model": CONFIG["gemini_model"],
+        "model_pro": CONFIG["gemini_model"],
+        "model_flash": CONFIG["gemini_flash_model"],
         "architecture": "Scout + Explorer Pipeline"
     }
 
@@ -343,6 +345,10 @@ async def generate_itinerary_stream(request: GenerateItineraryRequest):
             # Stream graph updates
             async for output in graph_app.astream(initial_state):
                 for node_name, node_state in output.items():
+                    # Write intermediate logs from each node to console.log
+                    for log_msg in node_state.get("logs", []):
+                        logger.log(log_msg)
+                    
                     if node_name == "scout":
                         links = node_state.get("scout_links", [])
                         captured_data["scout_links"] = links
@@ -469,7 +475,8 @@ if __name__ == "__main__":
     print("   Architecture: Scout + Explorer Pipeline")
     print("=" * 60)
     print(f"📡 Server: http://localhost:{CONFIG['port']}")
-    print(f"🤖 Model: {CONFIG['gemini_model']}")
+    print(f"🤖 Pro Model (Explorer): {CONFIG['gemini_model']}")
+    print(f"⚡ Flash Model (Scout/Edit): {CONFIG['gemini_flash_model']}")
     print("🔧 Endpoints:")
     print("   GET  /health")
     print("   GET  /api/interests")

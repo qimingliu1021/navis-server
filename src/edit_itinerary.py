@@ -12,7 +12,7 @@ from google import genai
 
 CONFIG = {
     "google_api_key": os.getenv("GOOGLE_API_KEY"),
-    "gemini_model": os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
+    "gemini_flash_model": os.getenv("GEMINI_FLASH_MODEL", "gemini-2.0-flash"),
 }
 
 # Gemini client (lazy init)
@@ -120,7 +120,7 @@ Provide the appropriate edit response as JSON."""
         client = get_client()
         response = await asyncio.to_thread(
             client.models.generate_content,
-            model=CONFIG["gemini_model"],
+            model=CONFIG["gemini_flash_model"],
             contents=system_prompt + "\n\n" + user_prompt,
             config={
                 "temperature": 0.3,

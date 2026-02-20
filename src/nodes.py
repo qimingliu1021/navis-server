@@ -17,8 +17,11 @@ async def scout_node(state: ItineraryState) -> Dict[str, Any]:
     start_date = state["start_date"]
     end_date = state["end_date"]
     
+    captured_logs = []
+    
     def log_func(msg: str):
         print(f"[Scout] {msg}")
+        captured_logs.append(f"[Scout] {msg}")
     
     log_func(f"Starting scout for {city} with interests: {interests}")
     
@@ -27,9 +30,11 @@ async def scout_node(state: ItineraryState) -> Dict[str, Any]:
         scout_events(city, interests, start_date, end_date, log_func)
     )
     
+    captured_logs.append(f"[Scout] Found {results.get('total_links_found', 0)} total links")
+    
     return {
         "scout_links": results.get("all_links", []),
-        "logs": [f"Scout found {results.get('total_links_found', 0)} links"]
+        "logs": captured_logs
     }
 
 
@@ -40,8 +45,11 @@ async def explorer_node(state: ItineraryState) -> Dict[str, Any]:
     links = state.get("scout_links", [])
     city = state["city"]
     
+    captured_logs = []
+    
     def log_func(msg: str):
         print(f"[Explorer] {msg}")
+        captured_logs.append(f"[Explorer] {msg}")
         
     log_func(f"Starting explorer with {len(links)} links")
     
@@ -50,9 +58,11 @@ async def explorer_node(state: ItineraryState) -> Dict[str, Any]:
         explore_links(links, city, log_func)
     )
     
+    captured_logs.append(f"[Explorer] Found {results.get('total_events', 0)} valid events")
+    
     return {
         "explorer_events": results.get("events", []),
-        "logs": [f"Explorer found {results.get('total_events', 0)} valid events"]
+        "logs": captured_logs
     }
 
 
@@ -73,5 +83,5 @@ async def planner_node(state: ItineraryState) -> Dict[str, Any]:
     return {
         "itinerary": sorted_events,
         "coverage": coverage,
-        "logs": ["Planner organized events and calculated coverage"]
+        "logs": ["[Planner] Organized events and calculated coverage"]
     }
